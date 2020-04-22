@@ -1,5 +1,6 @@
 import re
 import json
+import datetime
 import requests
 from pprint import pprint
 from urllib.parse import urlencode
@@ -8,9 +9,10 @@ from urllib.parse import urlencode
 class User:
 
     def __init__(self):
-        # self.USER_ID = 2402235
-        # self.ACCESS_TOKEN = 'b9861ff1ff10f76023de695f9e5b14ec16dd0a891681b1bde71624795e89e93bb0838f2eb1bc74c627d36'
+        self.USER_ID = 2402235
+        self.ACCESS_TOKEN = '0f60649bd1f046ea5d80bb86ec49808162bf5a91c54ba64db34bb95ead75983bedbfada6161842c602c63'
         self.users_groups_dict = {}
+        self.users_found = []
 
     def get_token_and_id(self):
         """
@@ -55,7 +57,7 @@ class User:
         params['user_ids'] = self.USER_ID
         params['fields'] = 'interests,movies,music,books,bdate'
         response = requests.get('https://api.vk.com/method/users.get', params)
-        return response.json()['response']
+        return response.json()['response'][0]
 
     def get_groups_user(self):
         """
@@ -124,13 +126,15 @@ class User:
         params['fields'] = 'interests,movies,music,books,bdate,common_count'
         params['has_photo'] = 1
         response = requests.get('https://api.vk.com/method/users.search', params)
+        self.users_found.append(response.json()['response']['items'])
+        # print(self.users_found[0])
         return response.json()['response']['items']
 
     def get_groups_users(self):
         """
         Возвращает список групп пользователей.
         """
-        for user in self.users_search():
+        for user in self.users_found[0]:
             params = self.get_params()
             params['user_id'] = user['id']
             users_groups = requests.get('https://api.vk.com/method/groups.get', params)
@@ -148,10 +152,61 @@ class User:
                         print('.')
                         break
                     elif users_groups.json()['error']['error_code'] != 6:
+                        self.users_groups_dict[user['id']] = []
                         break
                 else:
+                    self.users_groups_dict[user['id']] = []
                     break
+        with open('groups.json', 'w', encoding='utf-8') as file:
+            json.dump(self.users_groups_dict, file)
         return self.users_groups_dict
+
+    def age_difference(self):
+        """
+        Считает разницу в возрасте и возвращает список словарей пользователей.
+        В инфу о пользователе добавлен ключ ['age_difference'] - разница в возрасте в днях.
+        """
+        bdate_user = self.get_info_user()['bdate']
+        split_bdate_user = bdate_user.split('.')
+        format_bdate_user = datetime.date(int(split_bdate_user[2]),
+                                          int(split_bdate_user[1]),
+                                          int(split_bdate_user[0]))
+        users_search_list = self.users_search()
+        for user in users_search_list:
+            try:
+                if len(user['bdate']) > 5:
+                    split_bdate_found_user = user['bdate'].split('.')
+                    format_bdate_found_user = datetime.date(int(split_bdate_found_user[2]),
+                                                            int(split_bdate_found_user[1]),
+                                                            int(split_bdate_found_user[0]))
+                    diff_bdate = format_bdate_user - format_bdate_found_user
+                    fixed_diff_bdate = ''.join(str(diff_bdate).split('-', 1))
+                    user['age_difference'] = fixed_diff_bdate.split()[0]
+                else:
+                    user['age_difference'] = ''
+            except KeyError:
+                user['age_difference'] = ''
+
+        return users_search_list
+
+    def matching_groups(self):
+        """
+        Ищет совпадения групп и возвращает список словарей пользователей.
+        В инфу о пользователе добавлен ключ ['matching_groups'] - количество одинаковых групп.
+        """
+        groups = []
+        users_search_list_dif = self.age_difference()
+        for group in self.get_groups_user():
+            groups.append(group['id'])
+        set_groups_user = set(groups)
+        for key, value in self.get_groups_users().items():
+            set_groups_users = set(value)
+            matched = set_groups_user.intersection(set_groups_users)
+            for users in users_search_list_dif:
+                if users['id'] == int(key):
+                    users['matching_groups'] = len(matched)
+
+        return users_search_list_dif
 
 
 if __name__ == '__main__':
@@ -163,4 +218,6 @@ if __name__ == '__main__':
     # print(user.age_range_for_search())
     # print(user.city_for_search())
     # pprint(user.users_search())
-    pprint(user.get_groups_users())
+    # pprint(user.get_groups_users())
+    # pprint(user.age_difference())
+    pprint(user.matching_groups())
